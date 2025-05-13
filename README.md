@@ -14,7 +14,7 @@ MAILER_PORT=465
 MAILER_USER=dalusaga4@gmail.com
 MAILER_PASSWORD=dqyq brso ccoi dejt
 JWT_SECRET=c7e8352bc9ec5c7b9ab6613a066a0ec5340fe6bbdffb4d086a633d88ff9a7901
-DATABASE_URL="mysql://root:@localhost:3306/Pokeapi"   // importante cambiarlo por la URL de tu base de datos
+DATABASE_URL="mysql://root:@localhost:3306/QryptogeniaV2"   // importante cambiarlo por la URL de tu base de datos
 FRONTEND_URL=http://localhost:5173
 BACKEND_URL=http://localhost:3000/api
 
