@@ -1,0 +1,18 @@
+node_modules
+# Keep environment variables out of version control
+.env
+dist
+
+
+# Uploaded files in localhost (Development)
+
+# Uploaded file in localhost by clubs
+uploads/club_identification/*
+uploads/club_logo/*
+uploads/club_policy/*
+uploads/club_reconocimiento_deportivo/*
+uploads/social_security/*
+uploads/avatars/*
+
+# Player files
+uploads/players/social_security/*
