@@ -1,46 +1,768 @@
+datasource db {
+  provider = "postgresql"  
+  url      = env("DATABASE_URL")
+}
 
 generator client {
   provider = "prisma-client-js"
 }
 
-datasource db {
-  provider = "mysql"
-  url      = env("DATABASE_URL")
+model User {
+  id                    String              @id @default(uuid()) @db.Uuid
+  email                 String              @unique
+  status                UserStatus          @default(ACTIVE)
+  emailVerified         Boolean             @default(false)
+  phoneVerified         Boolean             @default(false)
+  twoFactorEnabled      Boolean             @default(false)
+  lastLogin             DateTime?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @default(now()) @updatedAt
+  deletedAt             DateTime?           // Implementación de soft delete
+  
+  // Relaciones
+  userAuth              UserAuth?           // Información de autenticación
+  profile               UserProfile?        // Perfil del usuario
+  userContacts          UserContact[]       // Contactos del usuario (teléfono, email alternativo, etc.)
+  sessions              UserSession[]       // Sesiones activas
+  authTokens            AuthToken[]         // Tokens de autenticación y recuperación
+  roles                 UserRole[]          // Roles asignados al usuario
+  
+  qrCodes               QrCode[]            // Códigos QR creados por el usuario
+  subscriptions         Subscription[]      // Suscripciones activas o pasadas
+  invoices              Invoice[]           // Facturas generadas
+  notifications         Notification[]      // Notificaciones del sistema
+  auditLogs             AuditLog[]          // Registro de auditoría
+  loginLogs             LoginLog[]          // Registros de intentos de inicio de sesión
+  qrDesigns             QrDesign[]          @relation("UserToQrDesign")
+  qrTemplates           QrTemplate[]        @relation("UserToQrTemplate")
+
+  @@index([email])
+  @@index([status])
+  @@map("users")
+}
+
+/// Almacena solicitudes de verificación para registro de usuario
+model UserVerification {
+  id                String    @id @default(uuid()) @db.Uuid
+  email             String    @unique
+  verificationCode  String    // Código de 6 dígitos enviado por correo
+  expiresAt         DateTime  // Tiempo de expiración (15-30 minutos)
+  createdAt         DateTime  @default(now())
+  lastAttemptAt     DateTime? // Último intento de verificación
+  attemptCount      Int       @default(0) // Contador de intentos fallidos
+  
+  @@index([email])
+  @@index([expiresAt]) 
+}
+
+/// Datos extendidos del perfil de usuario
+model UserProfile {
+  id                  String    @id @default(uuid()) @db.Uuid
+  userId              String    @unique @db.Uuid
+  profileType         ProfileType @default(PERSONAL)  // Tipo de perfil (personal, empresarial)
+  username            String?
+  firstName           String?
+  lastName            String?
+  profilePicturePath  String?   // Ruta de la imagen de perfil
+  birthDate           DateTime?
+  gender              Gender?
+  company             String?   // Nombre de empresa (para perfiles empresariales)
+  industryType        String?   // Tipo de industria
+  bio                 String?   @db.Text
+  preferredLanguage   String    @default("es")
+  timezone            String    @default("America/Bogota")
+  metadata            Json?     // Campos personalizados según el tipo de perfil
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @default(now()) @updatedAt
+
+  // Relaciones
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_profiles")
+}
+
+/// Información de autenticación del usuario
+model UserAuth {
+  id                     String    @id @default(uuid()) @db.Uuid
+  userId                 String    @unique @db.Uuid
+  passwordHash           String?   // Hash de la contraseña (null para usuarios de OAuth)
+  lastPasswordChange     DateTime? @default(now())
+  requiresPasswordChange Boolean   @default(false)
+  failedAttempts         Int       @default(0)
+  lockedUntil            DateTime?
+  mfaSecret              String?   // Secreto para autenticación de dos factores
+  mfaBackupCodes         String?   // Códigos de respaldo para 2FA (encriptados)
+  
+  // Campos para recuperación de contraseña
+  passwordResetToken     String?
+  passwordResetExpires   DateTime?
+  passwordResetAttempts  Int       @default(0)
+  lastPasswordResetAttempt DateTime?
+  
+  // Información de métodos de autenticación externos
+  authMethods            Json?     // {"google": {"id": "xxx", "email": "yyy", "lastLogin": "date"}}
+  
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @default(now()) @updatedAt
+
+  // Relaciones
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_auth")
+}
+
+/// Información de contacto del usuario
+model UserContact {
+  id          String      @id @default(uuid()) @db.Uuid
+  userId      String      @db.Uuid
+  contactType ContactType // Tipo de contacto (teléfono, email alternativo, etc.)
+  value       String      // Valor del contacto (número, email, etc.)
+  isPrimary   Boolean     @default(false)
+  verified    Boolean     @default(false)
+  label       String?     // Etiqueta personalizada (ej: "Trabajo", "Personal")
+  verifiedAt  DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @default(now()) @updatedAt
+
+  // Relaciones
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, contactType, value])
+  @@index([userId, contactType])
+  @@index([value])
+  @@map("user_contacts")
+}
+
+/// Sesiones activas del usuario
+model UserSession {
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @db.Uuid
+  sessionToken     String    @unique 
+  ipAddress        String?
+  userAgent        String?
+  deviceId         String?
+  deviceName       String?
+  locationInfo     Json?    
+  isActive         Boolean   @default(true)
+  isRevoked        Boolean   @default(false)
+  lastActivityAt   DateTime  @default(now())
+  expiresAt        DateTime
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @default(now()) @updatedAt
+  revokedAt        DateTime?
+  revokedReason    String?
+
+  // Relaciones
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isActive])
+  @@index([sessionToken])
+  @@index([expiresAt])
+  @@map("user_sessions")
+}
+
+/// Tokens de autenticación y recuperación
+model AuthToken {
+  id          String      @id @default(uuid()) @db.Uuid
+  userId      String      @db.Uuid
+  tokenHash   String      @unique // Hash del token (no el token en sí)
+  tokenType   TokenType   // Tipo de token (verificación, recuperación, etc.)
+  expiresAt   DateTime
+  isUsed      Boolean     @default(false)
+  metadata    Json?       // Metadatos adicionales según el tipo de token
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @default(now()) @updatedAt
+
+  // Relaciones
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, tokenType, isUsed])
+  @@index([tokenHash])
+  @@index([expiresAt])
+  @@map("auth_tokens")
+}
+
+/// Roles asignados a usuarios
+model UserRole {
+  userId      String    @db.Uuid
+  roleId      String    @db.Uuid
+  assignedAt  DateTime  @default(now())
+  assignedBy  String?   @db.Uuid // ID del usuario que asignó el rol (si aplica)
+  metadata    Json?     // Metadatos adicionales sobre la asignación
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @default(now()) @updatedAt
+
+  // Relaciones
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        Role      @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+/// Roles disponibles en el sistema
+model Role {
+  id                String    @id @default(uuid()) @db.Uuid
+  name              String    @unique
+  description       String?
+  isSystem          Boolean   @default(false)  // True para roles predefinidos del sistema
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @default(now()) @updatedAt
+
+  // Relaciones
+  userRoles         UserRole[]
+  rolePermissions   RolePermission[] @relation("RoleToRolePermission")
+
+  @@index([name])
+  @@map("roles")
+}
+
+model RolePermission {
+  roleId       String     @db.Uuid
+  permissionId String     @db.Uuid
+  permission   Permission @relation("PermissionToRolePermission", fields: [permissionId], references: [id])
+  role         Role       @relation("RoleToRolePermission", fields: [roleId], references: [id])
+
+  @@id([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+  @@map("role_permissions")
 }
 
 
-model users {
-  id_user          String   @id @default(cuid())
+model Permission {
+  id               String           @id @default(uuid()) @db.Uuid
+  code             String           @unique
   name             String
-  last_name        String
-  email            String   @unique
-  phone_number     String
-  state_id         Boolean  @default(true)
-  is_verified      Boolean  @default(false)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @default(now())
+  description      String?
+  
+  // Relation to RolePermission with explicit relation name
+  rolePermissions  RolePermission[] @relation("PermissionToRolePermission")
+  
+  category         String
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
-  // Relaciones        
-  credentials            credentials[] // Relación uno a muchos: Un usuario puede tener múltiples credenciales
-
-}
-
-model credentials {
-  user_id  String @id
-  password String
-  users    users  @relation(fields: [user_id], references: [id_user])
-}
-
-model Pokemon {
-  id             Int       @id @default(autoincrement())
-  name           String
-  types          String[]
-  stats          Json
-  image          String
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  @@index([code])
+  @@index([category])
+  @@map("permissions")
 }
 
 
+/// Registro de intentos de inicio de sesión
+model LoginLog {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String?   @db.Uuid // Puede ser null para intentos con usuarios no existentes
+  email             String?   // Email utilizado en el intento
+  ipAddress         String?
+  userAgent         String?
+  browser           String?
+  operatingSystem   String?
+  deviceType        String?
+  isSuccessful      Boolean   @default(false)
+  failureReason     String?
+  authMethod        String?   // email, google, facebook, etc.
+  attemptDate       DateTime  @default(now())
+  locationInfo      Json?     // Información de ubicación si está disponible
+
+  // Relaciones
+  user              User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([email])
+  @@index([ipAddress])
+  @@index([attemptDate])
+  @@index([isSuccessful])
+  @@map("login_logs")
+}
+
+/// Registro de auditoría para cambios importantes
+model AuditLog {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String?   @db.Uuid // Usuario que realizó la acción (null para sistema)
+  action            String    // Tipo de acción realizada
+  entityType        String    // Tipo de entidad afectada
+  entityId          String    @db.Uuid // ID de la entidad afectada
+  previousData      Json?     // Estado anterior
+  newData           Json?     // Nuevo estado
+  ipAddress         String?
+  userAgent         String?
+  metadata          Json?     // Información adicional relevante
+  createdAt         DateTime  @default(now())
+
+  // Relaciones
+  user              User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+/// Notificaciones para usuarios
+model Notification {
+  id                String    @id @default(uuid()) @db.Uuid
+  userId            String    @db.Uuid
+  type              String    // Tipo de notificación
+  title             String
+  message           String
+  isRead            Boolean   @default(false)
+  action            String?   // Acción asociada (URL o acción interna)
+  priority          NotificationPriority @default(NORMAL)
+  expiresAt         DateTime?
+  metadata          Json?
+  createdAt         DateTime  @default(now())
+  readAt            DateTime?
+
+  // Relaciones
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([type])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ============================================================
+// MODELOS DE CÓDIGOS QR
+// ============================================================
+
+/// Modelo principal de códigos QR
+/// Almacena la información básica de cada código QR generado en la plataforma
+/// Actúa como entidad central que se relaciona con el resto de componentes
+model QrCode {
+  id                String    @id @default(uuid()) @db.Uuid
+  name              String    // Nombre asignado por el usuario para identificar el QR
+  shortId           String    @unique // Identificador corto y único para URLs de escaneo (ej: "abc123")
+  description       String?   @db.Text
+  isActive          Boolean   @default(true) // Controla si el QR está activo y puede ser escaneado
+  isStatic          Boolean   @default(true) // True = QR fijo; False = QR dinámico (redirecciona según configuración)
+  dynamicUrl        String?   // URL para QRs dinámicos que pueden cambiar su destino sin regenerar el código
+  qrImageUrl        String?   // URL de almacenamiento externo (S3, Cloudinary) donde se guarda la imagen generada
+  qrImageData       Bytes?    // Datos binarios de la imagen del QR (alternativa a URL externa)
+  scanCount         Int       @default(0) // Contador de escaneos totales - se incrementa con cada escaneo
+  scanLimit         Int?      // Límite máximo de escaneos permitidos (null = ilimitado)
+  isArchived        Boolean   @default(false) // Permite "archivar" QRs sin eliminarlos definitivamente
+  expiresAt         DateTime? // Momento en que el QR dejará de funcionar automáticamente
+  lastScanAt        DateTime? // Timestamp del último escaneo - útil para análisis de uso
+  createdAt         DateTime  @default(now()) // Fecha de creación - automática
+  updatedAt         DateTime  @updatedAt // Fecha de última modificación - automática
+
+  // Relaciones
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade) // Propietario del QR
+  userId            String    @db.Uuid // Todo QR pertenece a un usuario concreto
+  design            QrDesign? @relation(fields: [designId], references: [id]) // Personalización visual 
+  designId          String?   @db.Uuid // Opcional - puede usar diseño por defecto
+  qrType            QrType    @relation(fields: [qrTypeId], references: [id]) // Tipo de QR (URL, Wifi, Texto, etc.)
+  qrTypeId          String    @db.Uuid // Todo QR tiene un tipo específico
+  content           QrContent? // Contenido específico según el tipo (relación 1:1)
+  template          QrTemplate? @relation(fields: [templateId], references: [id]) // Plantilla visual aplicada
+  templateId        String?   @db.Uuid // Opcional - puede no usar plantilla
+  scans             QrScan[]  // Registro detallado de cada escaneo individual (relación 1:N)
+  analytics         QrAnalytics? // Métricas agregadas para análisis (relación 1:1)
+
+  // Índices para optimizar búsquedas frecuentes
+  @@index([userId]) // Buscar QRs por usuario
+  @@index([shortId]) // Buscar QR por código corto (al escanear)
+  @@index([qrTypeId]) // Filtrar por tipo
+  @@index([designId]) // Buscar por diseño
+  @@index([createdAt]) // Ordenar por fecha
+  @@index([isActive]) // Filtrar activos/inactivos
+  @@map("qr_codes") // Nombre en la base de datos
+}
+
+/// Diseño visual del código QR
+/// Controla la apariencia estética del QR: colores, forma, estilo, etc.
+/// Permite crear diseños personalizados o usar plantillas predefinidas
+model QrDesign {
+  id                String    @id @default(uuid()) @db.Uuid
+  name              String?   // Nombre descriptivo del diseño (ej: "Corporativo Azul")
+  foregroundColor   String    @default("#000000") // Color de los píxeles/módulos del QR
+  backgroundColor   String    @default("#FFFFFF") // Color del fondo del QR
+  cornerStyle       String    @default("square")  // Forma de las esquinas: square, rounded, etc.
+  dotStyle          String    @default("square")  // Forma de los puntos internos: square, rounded, dots
+  logoUrl           String?   // Dirección de la imagen de logo a superponer en el centro
+  logoSize          Int?      // Tamaño del logo como porcentaje del QR (ej: 30 = 30%)
+  margin            Int       @default(4)         // Espacio blanco alrededor del QR (quiet zone)
+  errorCorrection   String    @default("M")       // Nivel de redundancia: L(7%), M(15%), Q(25%), H(30%)
+  isDefault         Boolean   @default(false)     // Indica si es un diseño predeterminado para usuarios
+  isSystem          Boolean   @default(false)     // True = diseño del sistema; False = diseño personalizado
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relaciones
+  qrCodes           QrCode[]  // QRs que utilizan este diseño (relación 1:N)
+  user              User?     @relation("UserToQrDesign", fields: [userId], references: [id], onDelete: SetNull) // Creador
+  userId            String?   @db.Uuid // Null para diseños del sistema / plantillas generales
+
+  @@index([userId]) // Buscar diseños por usuario
+  @@map("qr_designs")
+}
+
+/// Tipos de códigos QR disponibles
+/// Catálogo de los diferentes tipos de QR que pueden generarse
+/// Cada tipo tiene sus propios campos y comportamiento específico
+model QrType {
+  id                String    @id @default(uuid()) @db.Uuid
+  code              String    @unique // Identificador técnico único (URL, TEXT, WIFI, VCARDX)
+  name              String    // Nombre amigable para mostrar (URL, Texto, WiFi, Contacto)
+  description       String?   @db.Text // Descripción explicativa del tipo de QR
+  icon              String?   // Icono representativo para la UI
+  isActive          Boolean   @default(true) // Permite desactivar temporalmente tipos específicos
+  requiredFields    Json?     // Define qué campos necesita este tipo (esquema JSON)
+  orderIndex        Int       @default(0) // Orden de visualización en la interfaz
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relaciones
+  qrCodes           QrCode[] // QRs creados con este tipo (relación 1:N)
+
+  @@index([code]) // Para búsquedas rápidas por código
+  @@map("qr_types")
+}
+
+/// Contenido específico del código QR según su tipo
+/// Almacena los datos particulares de cada QR según su tipo
+/// Permite separar el contenido variable de la estructura básica del QR
+model QrContent {
+  id                String    @id @default(uuid()) @db.Uuid
+  content           Json      // Contenido en formato JSON según el tipo:
+                              // - URL: {"url": "https://..."}
+                              // - WiFi: {"ssid": "Red", "password": "clave", "encryption": "WPA"}
+                              // - Contacto: {"name", "phone", "email", ...}
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relaciones
+  qrCode            QrCode    @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+  qrCodeId          String    @unique @db.Uuid // Relación 1:1 con QrCode
+
+  @@map("qr_contents")
+}
+
+/// Plantillas para códigos QR
+/// Combinaciones predefinidas de diseño y configuración
+/// Facilitan la creación rápida de QRs con estilos coherentes
+model QrTemplate {
+  id                String    @id @default(uuid()) @db.Uuid
+  name              String    // Nombre descriptivo de la plantilla
+  description       String?   @db.Text // Descripción detallada de su aspecto y propósito
+  previewUrl        String?   // URL de imagen de vista previa para mostrar en la UI
+  isSystem          Boolean   @default(false) // True = plantilla predefinida; False = creada por usuario
+  templateData      Json      // Configuración completa del diseño y opciones
+  compatibleTypes   Json      // Lista de tipos de QR con los que es compatible (array)
+  category          String?   // Categoría para agrupar plantillas (Negocios, Personal, Festivo)
+  isPublic          Boolean   @default(false) // True = visible para todos; False = privada
+  isActive          Boolean   @default(true)  // Permite desactivar plantillas temporalmente
+  orderIndex        Int       @default(0)     // Orden de visualización en la UI
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relaciones
+  user              User?     @relation("UserToQrTemplate", fields: [userId], references: [id], onDelete: SetNull)
+  userId            String?   @db.Uuid // Creador (null para plantillas del sistema)
+  qrCodes           QrCode[]  // QRs que usan esta plantilla (relación 1:N)
+
+  @@index([userId])
+  @@index([category])
+  @@index([isPublic])
+  @@map("qr_templates")
+}
 
 
+/// Registro de escaneos de códigos QR
+/// Almacena información detallada de cada escaneo individual
+/// Facilita análisis detallado y trazabilidad de uso
+model QrScan {
+  id                String    @id @default(uuid()) @db.Uuid
+  ipAddress         String?   // Dirección IP del escáner (anonimizada según configuración)
+  userAgent         String?   // Navegador/dispositivo utilizado
+  deviceType        String?   // Categoría: mobile, desktop, tablet, etc.
+  operatingSystem   String?   // Sistema operativo del dispositivo
+  browser           String?   // Navegador utilizado
+  country           String?   // País del escaneo (basado en IP)
+  city              String?   // Ciudad del escaneo (basado en IP)
+  referrer          String?   // URL de procedencia (si aplica)
+  latitude          Float?    // Coordenada geográfica (si está disponible)
+  longitude         Float?    // Coordenada geográfica (si está disponible)
+  createdAt         DateTime  @default(now()) // Timestamp exacto del escaneo
+
+  // Relaciones
+  qrCode            QrCode    @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+  qrCodeId          String    @db.Uuid // QR escaneado
+
+  @@index([qrCodeId]) // Para consultas rápidas de escaneos por QR
+  @@index([createdAt]) // Para rangos temporales y ordenamiento
+  @@map("qr_scans")
+}
+
+/// Métricas agregadas de escaneos por código QR
+/// Almacena estadísticas precalculadas para análisis eficiente
+/// Evita consultas complejas y costosas al mantener datos agregados
+model QrAnalytics {
+  id                String    @id @default(uuid()) @db.Uuid
+  totalScans        Int       @default(0) // Contador total de escaneos
+  dailyScans        Json?     // Historial diario: {"2023-01-01": 25, "2023-01-02": 30}
+  weeklyScans       Json?     // Historial semanal: {"2023-W1": 120, "2023-W2": 150}
+  monthlyScans      Json?     // Historial mensual: {"2023-01": 500, "2023-02": 620}
+  deviceBreakdown   Json?     // Distribución por dispositivo: {"mobile": 70, "desktop": 30}
+  browserBreakdown  Json?     // Distribución por navegador: {"chrome": 60, "safari": 25}
+  countryBreakdown  Json?     // Distribución geográfica: {"ES": 40, "MX": 30, "CO": 15}
+  lastUpdated       DateTime  @default(now()) // Última actualización de las métricas
+  
+  // Relaciones
+  qrCode            QrCode    @relation(fields: [qrCodeId], references: [id], onDelete: Cascade)
+  qrCodeId          String    @unique @db.Uuid // Relación 1:1 con QrCode
+
+  @@map("qr_analytics")
+}
+
+// ============================================================
+// MODELOS DE SUSCRIPCIONES Y FACTURACIÓN
+// ============================================================
+
+/// Planes de suscripción disponibles
+/// Define los diferentes niveles de servicio ofrecidos en la plataforma
+/// Cada plan determina qué características y límites tiene un usuario suscrito
+model Plan {
+  id                String    @id @default(uuid()) @db.Uuid
+  code              String    @unique // Identificador único para referencias internas y APIs
+  name              String    // Nombre comercial del plan (ej: "Básico", "Premium", "Empresarial")
+  description       String?   @db.Text
+  features          Json      // Lista de características en formato JSON para mostrar en comparativas
+                              // Ej: ["100 QRs", "Analíticas básicas", "Soporte email"]
+  monthlyPrice      Decimal   @db.Decimal(10, 2) // Precio para facturación mensual
+  annualPrice       Decimal   @db.Decimal(10, 2) // Precio para facturación anual (típicamente con descuento)
+  currency          String    @default("USD") // Moneda de los precios (para internacionalización)
+  trialDays         Int       @default(0) // Días de prueba gratuita ofrecidos con este plan
+  qrLimit           Int?      // Número máximo de QRs que puede crear (null = ilimitado)
+  scanLimit         Int?      // Número máximo de escaneos permitidos (null = ilimitado)
+  
+  // Características habilitadas según el plan
+  dynamicQrEnabled  Boolean   @default(false) // Permite crear QRs dinámicos (redireccionables)
+  analyticsEnabled  Boolean   @default(false) // Acceso a estadísticas y análisis avanzados
+  customDomainsEnabled Boolean @default(false) // Permite usar dominios personalizados
+  apiAccessEnabled  Boolean   @default(false) // Acceso a la API para integración externa
+  bulkOperationsEnabled Boolean @default(false) // Creación y gestión masiva de QRs
+  customDesignsEnabled Boolean @default(false) // Diseños personalizados avanzados
+  
+  isActive          Boolean   @default(true) // Permite desactivar planes sin eliminarlos
+  orderIndex        Int       @default(0) // Define el orden de visualización en comparativas
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relaciones
+  subscriptions     Subscription[] // Usuarios suscritos a este plan (relación 1:N)
+  promotions        PlanPromotion[] // Promociones aplicables a este plan (relación N:M)
+
+  @@index([code]) // Optimiza búsquedas por código
+  @@index([isActive]) // Facilita filtrar planes activos/inactivos
+  @@map("plans")
+}
+
+/// Suscripciones activas de usuarios
+/// Registra la relación entre un usuario y el plan contratado
+/// Gestiona estados, períodos y renovaciones
+model Subscription {
+  id                String    @id @default(uuid()) @db.Uuid
+  status            SubscriptionStatus @default(ACTIVE) // Estado actual (activa, pendiente, cancelada)
+  startDate         DateTime  // Fecha de inicio de la suscripción
+  endDate           DateTime? // Fecha de finalización (null = indefinida/hasta cancelación)
+  isAutoRenew       Boolean   @default(true) // Indica si se renovará automáticamente
+  canceledAt        DateTime? // Cuándo se solicitó la cancelación (puede seguir activa hasta fin de período)
+  trialEndsAt       DateTime? // Cuándo finaliza el período de prueba, si aplica
+  currentPeriodStart DateTime  // Inicio del período de facturación actual
+  currentPeriodEnd  DateTime  // Fin del período de facturación actual
+  qrUsage           Int       @default(0) // Contador de QRs creados (para aplicar límites)
+  scanUsage         Int       @default(0) // Contador de escaneos (para aplicar límites)
+  metadata          Json?     // Datos adicionales específicos del proveedor o configuración
+  paymentProvider   String?   // Proveedor de pagos utilizado (Stripe, PayPal, etc.)
+  paymentProviderId String?   // Identificador de la suscripción en el sistema del proveedor
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relaciones
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId            String    @db.Uuid // Usuario propietario de la suscripción
+  plan              Plan      @relation(fields: [planId], references: [id])
+  planId            String    @db.Uuid // Plan contratado
+  invoices          Invoice[] // Facturas generadas para esta suscripción (relación 1:N)
+  promotion         Promotion? @relation(fields: [promotionId], references: [id])
+  promotionId       String?   @db.Uuid // Promoción/descuento aplicado si existe
+
+  @@index([userId]) // Encuentra rápidamente las suscripciones de un usuario
+  @@index([planId]) // Busca suscripciones por plan
+  @@index([status]) // Filtra por estado (activas, canceladas, etc.)
+  @@index([endDate]) // Para identificar próximas a vencer
+  @@map("subscriptions")
+}
+
+/// Facturas generadas
+/// Registra transacciones financieras relacionadas con suscripciones
+/// Proporciona historial financiero y documentación legal
+model Invoice {
+  id                String    @id @default(uuid()) @db.Uuid
+  invoiceNumber     String    @unique // Número de factura secuencial para identificación legal
+  amount            Decimal   @db.Decimal(10, 2) // Importe base sin impuestos
+  tax               Decimal   @db.Decimal(10, 2) // Impuestos aplicados
+  total             Decimal   @db.Decimal(10, 2) // Importe total con impuestos
+  currency          String    @default("USD") // Moneda de la factura
+  status            InvoiceStatus @default(PENDING) // Estado de pago (pendiente, pagada, etc.)
+  dueDate           DateTime  // Fecha límite de pago
+  paidAt            DateTime? // Fecha efectiva de pago (null = no pagada)
+  
+  // Datos de facturación para documentos legales
+  billingName       String?   // Nombre/empresa para facturación
+  billingEmail      String?   // Email de contacto para facturación
+  billingAddress    String?   // Dirección postal
+  billingCity       String?   // Ciudad
+  billingCountry    String?   // País
+  billingPostalCode String?   // Código postal
+  notes             String?   @db.Text
+  
+  paymentMethod     String?   // Método de pago utilizado (tarjeta, transferencia)
+  paymentProviderId String?   // ID de referencia en la plataforma de pagos
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relaciones
+  subscription      Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  subscriptionId    String    @db.Uuid // Suscripción a la que pertenece esta factura
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId            String    @db.Uuid // Usuario propietario de la factura
+
+  @@index([userId]) // Buscar facturas por usuario
+  @@index([subscriptionId]) // Buscar facturas por suscripción
+  @@index([status]) // Filtrar por estado de pago
+  @@index([invoiceNumber]) // Búsqueda rápida por número de factura
+  @@map("invoices")
+}
+
+/// Promociones y descuentos
+/// Sistema de incentivos comerciales para planes
+/// Permite crear ofertas por tiempo limitado o códigos promocionales
+model Promotion {
+  id                String    @id @default(uuid()) @db.Uuid
+  code              String    @unique  // Código promocional que introduce el usuario (ej: "SUMMER2023")
+  description       String?   @db.Text // Descripción interna o para mostrar al usuario
+  discountType      DiscountType  // Tipo de descuento: porcentaje o cantidad fija
+  discountValue     Decimal   @db.Decimal(10, 2) // Valor del descuento (% o cantidad)
+  maxUses           Int?      // Límite de usos totales permitidos (null = ilimitado)
+  usedCount         Int       @default(0) // Contador de veces utilizado
+  startDate         DateTime  // Fecha de inicio de la promoción
+  endDate           DateTime? // Fecha de finalización (null = sin fecha de fin)
+  isActive          Boolean   @default(true) // Permite desactivar temporalmente
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  // Relaciones
+  subscriptions     Subscription[] // Suscripciones que utilizan esta promoción
+  planPromotions    PlanPromotion[] // Relación con planes aplicables (N:M)
+
+  @@index([code]) // Búsqueda rápida por código promocional
+  @@index([isActive]) // Filtrar activas/inactivas
+  @@index([startDate, endDate]) // Filtrar por validez temporal
+  @@map("promotions")
+}
+
+/// Relación entre promociones y planes
+/// Tabla intermedia para la relación muchos a muchos
+/// Define qué promociones aplican a qué planes específicos
+model PlanPromotion {
+  id                String    @id @default(uuid()) @db.Uuid
+  createdAt         DateTime  @default(now())
+
+  // Relaciones - Crea la relación N:M entre planes y promociones
+  plan              Plan      @relation(fields: [planId], references: [id], onDelete: Cascade)
+  planId            String    @db.Uuid // Plan al que aplica la promoción
+  promotion         Promotion @relation(fields: [promotionId], references: [id], onDelete: Cascade)
+  promotionId       String    @db.Uuid // Promoción aplicada al plan
+
+  @@unique([planId, promotionId]) // Evita duplicados en la relación
+  @@map("plan_promotions")
+}
+
+// ============================================================
+// ENUMERACIONES
+// ============================================================
+
+enum UserStatus {
+  ACTIVE            
+  SUSPENDED         // Suspendido temporalmente
+  PENDING           // Pendiente de activación
+  INACTIVE          // Inactivo voluntariamente
+  BANNED            // Prohibido (permanente)
+}
+
+enum ContactType {
+  EMAIL           
+  PHONE             
+  WHATSAPP         
+  TELEGRAM         
+  OTHER             
+}
+
+enum TokenType {
+  EMAIL_VERIFICATION     
+  PASSWORD_RESET         
+  PHONE_VERIFICATION     
+  TWO_FACTOR_RECOVERY    
+  EMAIL_CHANGE            
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum ProfileType {
+  PERSONAL        
+  BUSINESS        
+  ORGANIZATION    
+  EDUCATION       
+}
+
+enum NotificationPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum VerificationType {
+  REGISTRATION     // Verificación inicial de registro
+  PASSWORD_RESET   // Restablecimiento de contraseña
+  EMAIL_CHANGE     // Cambio de correo electrónico
+  SENSITIVE_ACTION // Acciones sensibles que requieren re-verificación
+}
+
+enum SubscriptionStatus {
+  PENDING          // Pendiente de pago inicial
+  ACTIVE           // Suscripción activa
+  PAST_DUE         // Pago atrasado
+  CANCELED         // Cancelada por el usuario
+  EXPIRED          // Expirada sin renovación
+  TRIALING         // En periodo de prueba
+}
+
+enum InvoiceStatus {
+  DRAFT            // Borrador, aún no enviada
+  PENDING          // Pendiente de pago
+  PAID             // Pagada
+  VOID             // Anulada
+  REFUNDED         // Reembolsada
+  PARTIALLY_REFUNDED // Parcialmente reembolsada
+}
+
+enum DiscountType {
+  PERCENTAGE       // Porcentaje de descuento
+  FIXED_AMOUNT     // Monto fijo de descuento
+}

@@ -37,3 +37,51 @@ npm run dev
 ```
 # si nos aparece este mensaje como este significa que todo está funcionando correctamente:
 Server running on http://localhost:3000 👌
+
+---
+
+## Nueva versión con PostgreSQL 🐘
+
+A partir de la versión 2.0, QRyptogenia utiliza PostgreSQL como base de datos principal. Sigue estos pasos para configurar el nuevo entorno:
+
+### Configuración PostgreSQL
+
+1. Asegúrate de tener PostgreSQL instalado y corriendo:
+```bash
+psql --version
+```
+
+2. Crea una base de datos para el proyecto:
+```bash
+createdb qryptogenia_db
+```
+
+3. Actualiza tu archivo `.env` para usar PostgreSQL:
+```
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/qryptogenia_db?schema=public"
+```
+
+### Migraciones con el nuevo esquema
+
+1. Elimina las migraciones antiguas si estás migrando desde MySQL:
+```bash
+rm -rf prisma/migrations
+```
+
+2. Genera nuevas migraciones para PostgreSQL:
+```bash
+npx prisma migrate dev --name init
+```
+
+### Poblar la base de datos
+
+```bash
+npm run seed
+```
+
+> Nota: El nuevo seed crea un administrador (admin@qryptogenia.com) y varios usuarios de prueba, todos con la contraseña: User123.
+
+Para visualizar la estructura de la base de datos:
+```bash
+npx prisma studio
+```
