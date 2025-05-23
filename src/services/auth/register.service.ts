@@ -16,11 +16,11 @@ export const register = async (userInformation: IUserRegister) => {
     try {
         const { name, last_name, email, phone_number, password } = userInformation;
 
-        const existingUser = await db.users.findFirst({ where: {email}});
+        const existingUser = await db.user.findFirst({ where: {email}});
         if (existingUser) throw new Error(`User with email ${email} already exists.`); //validate email uniqueness
         
 
-        const createdUser = await db.users.create({
+        const createdUser = await db.user.create({
             data: {
                 name,
                 last_name,

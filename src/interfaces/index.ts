@@ -1,10 +1,8 @@
 
-import { IUserRegister } from './user.types';
-import {IPaginationsAndSearch} from './general.types'
-
+import {IPaginationsAndSearch}  from './general.types'
+import {IRoles}                 from './roles.types'
 
 export {
-  IUserRegister,
   IPaginationsAndSearch,
- 
+  IRoles
 };
